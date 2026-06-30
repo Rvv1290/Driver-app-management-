@@ -1,0 +1,264 @@
+<!--
+  RVIP DRIVER ADMIN — drop-in snippet for seacoastrvip.com/admin.html
+  ─────────────────────────────────────────────────────────────────────
+  HOW TO USE:
+    1. Open your existing admin.html.
+    2. Paste this entire snippet inside <body>...</body> (anywhere is fine).
+    3. Change the TWO values inside `RVIP_CONFIG` below — your Render URL
+       and the admin token from Render's env vars.
+    4. Commit & push to your website repo. Done.
+
+  Self-contained — no frameworks, no build step. Vanilla HTML/JS/CSS.
+-->
+<div id="rvip-admin-root" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#fff;background:#0a0a0a;padding:24px;min-height:100vh;">
+
+  <!-- ─── CONFIG ─────────────────────────────────────────────────── -->
+  <script>
+    const RVIP_CONFIG = {
+      // Your Render backend URL (no trailing slash)
+      BACKEND_URL: "https://rvip-admin-backend-XXXX.onrender.com",
+      // The token you put in Render's ADMIN_API_TOKEN env var
+      ADMIN_TOKEN: "PASTE_YOUR_LONG_HEX_TOKEN_HERE"
+    };
+  </script>
+
+  <!-- ─── HEADER ─────────────────────────────────────────────────── -->
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:24px;">
+    <h1 style="font-size:24px;font-weight:900;color:#d4af37;margin:0;">RVIP Driver Admin</h1>
+    <span id="rvip-status" style="font-size:12px;color:#888;">Connecting…</span>
+  </div>
+
+  <!-- ─── LAYOUT ─────────────────────────────────────────────────── -->
+  <div style="display:grid;grid-template-columns:320px 1fr;gap:24px;">
+
+    <!-- LEFT: driver list -->
+    <div style="background:#181818;border:1px solid #222;border-radius:12px;padding:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <strong style="font-size:14px;">Drivers</strong>
+        <button onclick="rvipLoadDrivers()" style="background:#d4af37;color:#000;border:none;padding:4px 10px;border-radius:6px;font-weight:bold;font-size:11px;cursor:pointer;">Refresh</button>
+      </div>
+      <div id="rvip-driver-list" style="display:flex;flex-direction:column;gap:6px;">Loading…</div>
+    </div>
+
+    <!-- RIGHT: driver detail -->
+    <div id="rvip-driver-detail" style="background:#181818;border:1px solid #222;border-radius:12px;padding:20px;min-height:400px;">
+      <p style="color:#777;">Pick a driver on the left.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+//
+// ── API client ─────────────────────────────────────────────────────
+//
+async function rvipApi(path, opts = {}) {
+  const r = await fetch(RVIP_CONFIG.BACKEND_URL + path, {
+    ...opts,
+    headers: {
+      "Authorization": "Bearer " + RVIP_CONFIG.ADMIN_TOKEN,
+      "Content-Type": "application/json",
+      ...(opts.headers || {})
+    }
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`API ${r.status}: ${t}`);
+  }
+  return r.json();
+}
+
+//
+// ── Driver list (left column) ─────────────────────────────────────
+//
+async function rvipLoadDrivers() {
+  const list = document.getElementById("rvip-driver-list");
+  list.innerHTML = "Loading…";
+  try {
+    const { drivers } = await rvipApi("/api/drivers");
+    document.getElementById("rvip-status").textContent =
+      `Connected · ${drivers.length} driver${drivers.length === 1 ? "" : "s"}`;
+    document.getElementById("rvip-status").style.color = "#4ade80";
+    list.innerHTML = "";
+    drivers.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    for (const d of drivers) {
+      const btn = document.createElement("button");
+      btn.style.cssText =
+        "background:#222;border:1px solid #2a2a2a;color:#fff;padding:10px 12px;border-radius:8px;text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-size:13px;";
+      const verifyDot = d.isVerified
+        ? '<span style="color:#4ade80;">●</span>'
+        : '<span style="color:#facc15;">○</span>';
+      btn.innerHTML = `
+        <div>
+          <div style="font-weight:bold;">${d.name || "(no name)"}</div>
+          <div style="color:#888;font-size:11px;">${d.phone || ""}</div>
+        </div>
+        <div>${verifyDot}</div>
+      `;
+      btn.onclick = () => rvipLoadDriver(d.id);
+      list.appendChild(btn);
+    }
+  } catch (e) {
+    document.getElementById("rvip-status").textContent = "Error: " + e.message;
+    document.getElementById("rvip-status").style.color = "#f87171";
+    list.innerHTML = `<div style="color:#f87171;font-size:12px;">${e.message}</div>`;
+  }
+}
+
+//
+// ── Driver detail (right column) ───────────────────────────────────
+//
+async function rvipLoadDriver(driverId) {
+  const detail = document.getElementById("rvip-driver-detail");
+  detail.innerHTML = "Loading…";
+  try {
+    const { driver, documents } = await rvipApi("/api/drivers/" + driverId);
+    const currentWeek = rvipCurrentWeekKey();
+    const payout = await rvipApi(`/api/drivers/${driverId}/payouts/${currentWeek}`).catch(() => null);
+
+    let html = `
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
+        <div style="width:60px;height:60px;border-radius:50%;background:#d4af37;display:flex;align-items:center;justify-content:center;color:#000;font-weight:bold;font-size:22px;overflow:hidden;">
+          ${driver.photoURL
+            ? `<img src="${driver.photoURL}" style="width:100%;height:100%;object-fit:cover;">`
+            : (driver.name || "?").charAt(0).toUpperCase()}
+        </div>
+        <div>
+          <div style="font-size:18px;font-weight:bold;">${driver.name || "(no name)"}</div>
+          <div style="color:#888;font-size:13px;">${driver.email || ""} · ${driver.phone || ""}</div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;">
+        ${driver.isVerified
+          ? '<span style="background:#16331f;color:#4ade80;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:bold;">VERIFIED</span>'
+          : `<button onclick="rvipVerify('${driverId}')" style="background:#d4af37;color:#000;border:none;padding:6px 12px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:11px;">Mark Verified</button>`
+        }
+        ${driver.isActive === false
+          ? '<span style="background:#3a1717;color:#f87171;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:bold;">SUSPENDED</span>'
+          : `<button onclick="rvipSuspend('${driverId}')" style="background:transparent;color:#f87171;border:1px solid #f87171;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:11px;">Suspend</button>`
+        }
+      </div>
+
+      <h3 style="font-size:13px;color:#d4af37;letter-spacing:1.5px;margin:0 0 12px;">DOCUMENTS</h3>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:24px;">
+    `;
+
+    const requiredDocs = [
+      { type: "dl_front",       label: "Driver License (Front)" },
+      { type: "coi",            label: "Commercial Insurance" },
+      { type: "registration",   label: "Vehicle Registration" },
+      { type: "tnc_inspection", label: "TNC Inspection" }
+    ];
+    for (const req of requiredDocs) {
+      const doc = documents.find(d => d.docType === req.type);
+      if (!doc) {
+        html += `
+          <div style="background:#111;border:1px solid #222;padding:12px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+            <span>${req.label}</span>
+            <span style="color:#777;font-size:11px;">Not uploaded</span>
+          </div>`;
+        continue;
+      }
+      const color = doc.verificationStatus === "approved" ? "#4ade80"
+                  : doc.verificationStatus === "rejected" ? "#f87171"
+                  : "#facc15";
+      html += `
+        <div style="background:#111;border:1px solid #222;padding:12px;border-radius:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:8px;">
+            <span><strong>${req.label}</strong> · <span style="color:${color};">${doc.verificationStatus}</span></span>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <a href="${doc.viewerUrl}" target="_blank" style="background:#222;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;text-decoration:none;">View</a>
+            <button onclick="rvipApproveDoc('${driverId}','${req.type}')" style="background:#16331f;color:#4ade80;border:1px solid #1f5a2e;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer;">Approve</button>
+            <button onclick="rvipRejectDoc('${driverId}','${req.type}')" style="background:#3a1717;color:#f87171;border:1px solid #5a1f1f;padding:5px 10px;border-radius:6px;font-size:11px;cursor:pointer;">Reject</button>
+          </div>
+        </div>`;
+    }
+
+    html += `</div>`;
+
+    // Payout block
+    if (payout) {
+      const isPaid = !!payout.paid;
+      html += `
+        <h3 style="font-size:13px;color:#d4af37;letter-spacing:1.5px;margin:0 0 12px;">THIS WEEK · ${payout.week}</h3>
+        <div style="background:#111;border:1px solid #222;padding:16px;border-radius:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <span style="font-size:13px;color:#888;">${payout.trips} trip${payout.trips === 1 ? "" : "s"} · Tips $${payout.tips.toFixed(0)}</span>
+            <span style="font-size:24px;font-weight:bold;color:${isPaid ? "#4ade80" : "#d4af37"};">$${payout.total.toFixed(2)}</span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            ${isPaid
+              ? `<span style="background:#16331f;color:#4ade80;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:bold;">PAID via ${payout.paid.method || "?"}</span>
+                 <button onclick="rvipUnmarkPaid('${driverId}','${payout.week}')" style="background:transparent;color:#f87171;border:1px solid #f87171;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:11px;">Undo</button>`
+              : `<button onclick="rvipMarkPaid('${driverId}','${payout.week}', ${payout.total})" style="background:#4ade80;color:#000;border:none;padding:6px 14px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:12px;">Mark Paid ($${payout.total.toFixed(2)})</button>`
+            }
+          </div>
+        </div>
+      `;
+    }
+
+    detail.innerHTML = html;
+    detail.dataset.driverId = driverId;
+  } catch (e) {
+    detail.innerHTML = `<div style="color:#f87171;">Error: ${e.message}</div>`;
+  }
+}
+
+//
+// ── Actions ───────────────────────────────────────────────────────
+//
+async function rvipVerify(id) {
+  await rvipApi(`/api/drivers/${id}/verify`, { method: "POST" });
+  rvipLoadDriver(id); rvipLoadDrivers();
+}
+async function rvipSuspend(id) {
+  const reason = prompt("Suspension reason (optional)") || "";
+  await rvipApi(`/api/drivers/${id}/suspend`, {
+    method: "POST", body: JSON.stringify({ suspended: true, reason })
+  });
+  rvipLoadDriver(id); rvipLoadDrivers();
+}
+async function rvipApproveDoc(id, type) {
+  await rvipApi(`/api/drivers/${id}/docs/${type}/approve`, { method: "POST" });
+  rvipLoadDriver(id);
+}
+async function rvipRejectDoc(id, type) {
+  const reason = prompt("Reject reason:") || "";
+  if (!reason) return;
+  await rvipApi(`/api/drivers/${id}/docs/${type}/reject`, {
+    method: "POST", body: JSON.stringify({ reason })
+  });
+  rvipLoadDriver(id);
+}
+async function rvipMarkPaid(id, week, amount) {
+  const method = prompt("Payment method (venmo / zelle / cash / etc.)", "venmo");
+  if (!method) return;
+  await rvipApi(`/api/drivers/${id}/payouts/${week}/mark-paid`, {
+    method: "POST",
+    body: JSON.stringify({ amount, method, note: "" })
+  });
+  rvipLoadDriver(id);
+}
+async function rvipUnmarkPaid(id, week) {
+  if (!confirm("Mark this week unpaid?")) return;
+  await rvipApi(`/api/drivers/${id}/payouts/${week}/mark-unpaid`, { method: "POST" });
+  rvipLoadDriver(id);
+}
+
+//
+// ── Helpers ───────────────────────────────────────────────────────
+//
+function rvipCurrentWeekKey() {
+  const now = new Date();
+  const target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const dayNum = (target.getUTCDay() + 6) % 7;
+  target.setUTCDate(target.getUTCDate() - dayNum + 3);
+  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((target - firstThursday) / 86400000 - 3 + (firstThursday.getUTCDay() + 6) % 7) / 7);
+  return `${target.getUTCFullYear()}_W${String(week).padStart(2,"0")}`;
+}
+
+// Boot
+rvipLoadDrivers();
+</script>

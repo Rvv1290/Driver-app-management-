@@ -1,0 +1,20 @@
+{
+  "name": "rvip-admin-backend",
+  "version": "1.0.0",
+  "description": "Admin backend for RVIP — separate from the main webapp. Uses Firebase service account to read/write Firestore for driver onboarding, document review, and weekly payouts.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "firebase-admin": "^12.4.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
